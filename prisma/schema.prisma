@@ -1,0 +1,220 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  VENDEUR
+}
+enum Statut {
+  EN_STOCK
+  EN_RAYON
+  VENDU
+  RETOURNE
+  ENDOMMAGE
+  PERDU
+}
+enum VenteStatut {
+  VALIDE
+  RETOURNEE
+  ANNULEE
+}
+enum AnomalieType {
+  BAISSE_PRIX
+  RETOURS_REPETES
+  RAFALE_VENTES
+  STOCK_BAS
+  ARTICLE_A_VERIFIER
+  ECART_INVENTAIRE
+}
+enum AnomalieStatut {
+  A_VERIFIER
+  ECARTEE
+  CONFIRMEE
+}
+
+// Un magasin pour commencer ; tout est déjà rattaché à un magasin pour pouvoir en ajouter.
+model Magasin {
+  id                   String  @id @default(cuid())
+  nom                  String
+  seuilBaissePrixPct   Int     @default(20)  // baisse de prix à partir de laquelle on alerte
+  delaiVerificationH   Int     @default(24)  // délai avant relance d'un article signalé
+  rafaleNombre         Int     @default(5)   // ventes ...
+  rafaleMinutes        Int     @default(5)   // ... en moins de X minutes
+  retoursParJour       Int     @default(3)   // retours par vendeur et par jour avant alerte
+  users                User[]
+  produits             Produit[]
+  articles             Article[]
+  ventes               Vente[]
+  anomalies            Anomalie[]
+  inventaires          Inventaire[]
+  journalComptes       JournalCompte[]
+}
+
+model User {
+  id         String  @id @default(cuid())
+  magasinId  String
+  magasin    Magasin @relation(fields: [magasinId], references: [id])
+  nom        String
+  identifiant String @unique          // minuscules, ex. "awa"
+  telephone  String?                  // numéro WhatsApp, chiffres avec indicatif
+  motDePasse String
+  role       Role    @default(VENDEUR)
+  actif      Boolean @default(true)
+  doitChangerMdp  Boolean   @default(false) // mot de passe provisoire à remplacer
+  codeRecuperationHash String?              // code de récupération (haché)
+  echecsConnexion Int       @default(0)
+  verrouilleJusqua DateTime?
+  sessionVersion Int        @default(0)     // +1 = toutes les sessions ouvertes sont fermées
+  ventes     Vente[]
+  abonnements AbonnementPush[]
+  notifications Notification[]
+}
+
+model Produit {
+  id            String  @id @default(cuid())
+  magasinId     String
+  magasin       Magasin @relation(fields: [magasinId], references: [id])
+  nom           String
+  reference     String?
+  prix          Int     // FCFA, entier
+  seuilStockBas Int     @default(0)
+  actif         Boolean @default(true) // false = archivé (n'apparaît plus dans le catalogue, historique conservé)
+  articles      Article[]
+}
+
+model Article {
+  id         String      @id @default(cuid())
+  magasinId  String
+  magasin    Magasin     @relation(fields: [magasinId], references: [id])
+  code       String      @unique @default(cuid())
+  produitId  String
+  produit    Produit     @relation(fields: [produitId], references: [id])
+  statut     Statut      @default(EN_STOCK)
+  creeLe     DateTime    @default(now())
+  ventes     Vente[]
+  mouvements Mouvement[]
+  ecarts     EcartInventaire[]
+  @@index([produitId, statut])
+}
+
+model Vente {
+  id             String      @id @default(cuid())
+  magasinId      String
+  magasin        Magasin     @relation(fields: [magasinId], references: [id])
+  articleId      String
+  article        Article     @relation(fields: [articleId], references: [id])
+  vendeurId      String
+  vendeur        User        @relation(fields: [vendeurId], references: [id])
+  prixCatalogue  Int         // copié au moment de la vente
+  montant        Int         // prix réellement encaissé
+  statut         VenteStatut @default(VALIDE)
+  date           DateTime    @default(now())
+  motifAnnulation String?
+  @@index([date])
+  @@index([vendeurId, date])
+}
+
+// Journal : ajout seul (protégé par trigger, voir prisma/protections.sql).
+model Mouvement {
+  id        String   @id @default(cuid())
+  articleId String
+  article   Article  @relation(fields: [articleId], references: [id])
+  de        Statut?
+  vers      Statut
+  userId    String
+  motif     String?
+  date      DateTime @default(now())
+  @@index([articleId, date])
+}
+
+model Anomalie {
+  id        String         @id @default(cuid())
+  magasinId String
+  magasin   Magasin        @relation(fields: [magasinId], references: [id])
+  type      AnomalieType
+  statut    AnomalieStatut @default(A_VERIFIER)
+  articleId String?
+  venteId   String?
+  userId    String?
+  produitId String?
+  detail    String
+  note      String?
+  creeLe    DateTime       @default(now())
+  traiteeLe DateTime?
+  @@index([magasinId, statut])
+}
+
+model Inventaire {
+  id        String            @id @default(cuid())
+  magasinId String
+  magasin   Magasin           @relation(fields: [magasinId], references: [id])
+  creePar   String
+  debut     DateTime          @default(now())
+  cloture   DateTime?
+  manquants  Int?
+  inattendus Int?
+  lignes    LigneInventaire[]
+  ecarts    EcartInventaire[]
+}
+
+model LigneInventaire {
+  id           String     @id @default(cuid())
+  inventaireId String
+  inventaire   Inventaire @relation(fields: [inventaireId], references: [id])
+  articleId    String
+  scanneLe     DateTime   @default(now())
+  @@unique([inventaireId, articleId])
+}
+
+// Boîte d'envoi : écrite dans la même transaction que l'événement, envoyée ensuite.
+model Notification {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+  titre      String
+  corps      String
+  lien       String?
+  creeLe     DateTime  @default(now())
+  envoyeeLe  DateTime?
+  tentatives Int       @default(0)
+  erreur     String?
+  @@index([envoyeeLe])
+}
+
+model AbonnementPush {
+  id       String   @id @default(cuid())
+  userId   String
+  user     User     @relation(fields: [userId], references: [id])
+  endpoint String   @unique
+  p256dh   String
+  auth     String
+  creeLe   DateTime @default(now())
+}
+
+// Journal des opérations sur les comptes : ajout seul (voir protections.sql).
+model JournalCompte {
+  id        String   @id @default(cuid())
+  magasinId String
+  magasin   Magasin  @relation(fields: [magasinId], references: [id])
+  cibleId   String
+  acteurId  String?
+  action    String
+  date      DateTime @default(now())
+  @@index([cibleId, date])
+}
+
+// Écarts constatés à la clôture d'un inventaire (conservés pour consulter le détail plus tard).
+model EcartInventaire {
+  id           String     @id @default(cuid())
+  inventaireId String
+  inventaire   Inventaire @relation(fields: [inventaireId], references: [id])
+  articleId    String
+  article      Article    @relation(fields: [articleId], references: [id])
+  type         String     // "MANQUANT" ou "INATTENDU"
+  @@index([inventaireId])
+}

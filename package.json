@@ -1,0 +1,43 @@
+{
+  "name": "ventes-qr",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "db:push": "prisma db push",
+    "seed": "node prisma/seed.mjs",
+    "db:protections": "prisma db execute --file prisma/protections.sql --schema prisma/schema.prisma",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "proprietaire": "node prisma/creer-proprietaire.mjs",
+    "demo": "node prisma/demo.mjs"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "@types/web-push": "^3.6.4",
+    "bcryptjs": "^2.4.3",
+    "html5-qrcode": "^2.3.8",
+    "lucide-react": "^0.469.0",
+    "next": "^15.1.0",
+    "next-auth": "^4.24.11",
+    "qrcode": "^1.5.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.10.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "prisma": "^5.22.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.7"
+  },
+  "overrides": {
+    "postcss": "^8.5.23"
+  }
+}
